@@ -76,6 +76,29 @@ pipeline {
                 bat 'mvn -B -ntp jacoco:report'
             }
         }
+
+        stage('Main Release Candidate') {
+            when {
+                expression {
+                    def branch = env.BRANCH_NAME ?: env.GIT_BRANCH ?: ''
+                    return branch == 'master' || branch == 'origin/master'
+                }
+            }
+            steps {
+                echo "Ветка: ${env.BRANCH_NAME ?: env.GIT_BRANCH} - выполняется этап только для master"
+                powershell '''
+                    $jar = "target\\task-manager-cicd-1.0.0.jar"
+                    if (-not (Test-Path $jar)) { throw "JAR не найден: $jar" }
+                    $h = (Get-FileHash $jar -Algorithm SHA256).Hash
+                    Write-Host "SHA-256: $h"
+                    "$h  task-manager-cicd-1.0.0.jar" | Out-File target\\release-candidate.sha256 -Encoding ascii
+                '''
+                archiveArtifacts(
+                    artifacts: 'target/task-manager-cicd-1.0.0.jar,target/release-candidate.sha256',
+                    fingerprint: true
+                )
+            }
+        }
     }
 
     /*
