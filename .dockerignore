@@ -1,0 +1,9 @@
+target/
+.git/
+.github/
+.idea/
+*.iml
+*.json
+*.txt
+Jenkinsfile
+README.md
