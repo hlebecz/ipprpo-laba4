@@ -1,13 +1,5 @@
 pipeline {
     /*
-     * Конвейер выполняется на Windows Agent,
-     * которому присвоена метка windows-java21-agent.
-     */
-    agent {
-        label 'windows-java21-agent'
-    }
-
-    /*
      * Общие настройки Pipeline.
      */
     options {
