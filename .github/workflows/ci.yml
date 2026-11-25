@@ -1,0 +1,146 @@
+name: Java Application CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      run_docker:
+        description: 'Run optional Docker build and smoke test'
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: java-ci-${{ github.ref }}4
+  cancel-in-progress: true
+
+jobs:
+
+  verify:
+
+    name: Build, unit and integration tests
+
+    runs-on: windows-latest
+
+    steps:
+
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          java -version
+          mvn -version
+          git --version
+
+      - name: Build and verify
+        shell: pwsh
+        run: mvn -B -ntp clean verify
+
+      - name: Verify JAR exists
+        if: success()
+        shell: pwsh
+        run: |
+          $jar = 'target/task-manager-cicd-1.0.0.jar'
+          if (-not (Test-Path $jar)) {
+            Write-Error "JAR not found: $jar"
+            exit 1
+          }
+          Get-Item $jar | Select-Object Name, Length
+
+      - name: Calculate JAR SHA-256
+        if: success()
+        shell: pwsh
+        run: |
+          $jar = 'target/task-manager-cicd-1.0.0.jar'
+          $hash = (Get-FileHash $jar -Algorithm SHA256).Hash
+          Write-Host "SHA-256: $hash"
+          "$hash  task-manager-cicd-1.0.0.jar" |
+            Out-File -Encoding ascii 'target/task-manager-cicd-1.0.0.jar.sha256'
+
+      - name: Generate Surefire HTML report
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path 'target/surefire-reports') {
+            mvn -B -ntp surefire-report:report-only
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          } else {
+            Write-Host 'Surefire reports are absent.'
+          }
+
+      - name: Generate JaCoCo HTML report
+        if: always()
+        shell: pwsh
+        run: |
+          if (Test-Path 'target/jacoco.exec') {
+            mvn -B -ntp jacoco:report
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          } else {
+            Write-Host 'JaCoCo execution data is absent.'
+          }
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-windows
+          path: |
+            target/surefire-reports/**
+            target/failsafe-reports/**
+            target/site/surefire-report.html
+            target/site/jacoco/**
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload executable JAR
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: task-manager-jar
+          path: |
+            target/task-manager-cicd-1.0.0.jar
+            target/task-manager-cicd-1.0.0.jar.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  docker-build-smoke-test:
+
+
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_docker }}
+
+    name: Build and smoke-test Linux image
+
+    needs: verify
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Build Docker image
+        run: docker build -t task-manager-cicd:ci .
